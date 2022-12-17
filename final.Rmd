@@ -1,0 +1,375 @@
+---
+title: "final"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Final Project
+
+## Setup
+
+- "American Employers as Political Machines" by Alexander Hertel-Fernandez
+  - paper: https://scholar.harvard.edu/files/ahertel/files/empmachine-jop.pdf
+  - data: https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/YNOR7Q
+  
+```{r}
+library("scales")
+library(haven)
+library(lmtest)
+library(multiwayvcov)
+library(car)
+library("gridExtra")
+
+cces_tibble_df <- read_dta("~/Downloads/Barnard/Linear_Reg/final/data/CCES_Data.dta")
+cces_df <- as.data.frame(cces_tibble_df)
+
+firm_tibble_df <- read_dta("~/Downloads/Barnard/Linear_Reg/final/data/YouGov_Data.dta")
+firm_df <- as.data.frame(firm_tibble_df)
+```
+
+## The Data: CCES
+
+```{r}
+# for CCES, reproducing the descriptive statistics table
+dim(cces_df) # 1000 by 33
+
+cces_df_len <- dim(cces_df)[1]
+cces_desc_stats <- c("participationindex", "emp_mobil", "emp_track_bin2",
+                     "warning_jobplantloss", "union_mobil", "partycand_mobil",
+                     "currentunionmem", "educ3", "white", "black",
+                     "hispanicrrace", "polinterest", "age", "male", "famincr",
+                     "ideo_cons", "pvidistance", "votedin2012",
+                     "unempratecounty14")
+cces_desc_stat_tab <- matrix(data=NA, nrow=length(cces_desc_stats), ncol=6)
+colnames(cces_desc_stat_tab) <- c("var", "max_N", "mean", "sd", "min", "max")
+
+for(i in seq_along(cces_desc_stats)) {
+  stat_i <- cces_df[, cces_desc_stats[i]]
+  nas_i <- sum(is.na(stat_i))
+  
+  cces_desc_stat_tab[i, ] <- c(cces_desc_stats[i],
+                          cces_df_len - nas_i,
+                          round(mean(stat_i, na.rm=TRUE), 2), 
+                          round(sd(stat_i, na.rm=TRUE), 2),
+                          round(min(stat_i, na.rm=TRUE), 2),
+                          round(max(stat_i, na.rm=TRUE), 2))
+}
+
+as.table(cces_desc_stat_tab)
+
+# a lot of binary data, and a lot of NAs for perception of employer monitoring
+```
+
+```{r}
+par(mfrow = c(1, 2))
+hist(cces_df$polinterest, breaks=0:7)
+hist(cces_df$participationindex, breaks=-1:5)
+
+# an increased political interest does not seem to require increased participation
+  # however, a low political interest does mean low participation
+  # to note, there is no data for polinterest = 2, 3
+plot(cces_df$polinterest, cces_df$participationindex, pch=16, col=alpha("blue", 0.1))
+
+# a mosaic plot
+  # we see that most of the population has a participation index of 0 or 1
+  # additionally, a majority is highly politically interested with a rank of 6 or 7
+table1 <- table(cces_df$polinterest, cces_df$participationindex)
+mosaicplot(table1, xlab="political interest", ylab="participation index",
+           shade=TRUE)
+
+# this is important to first get a sense of a population and their political participation
+```
+
+```{r}
+par(mfrow = c(1, 2))
+hist(cces_df$emp_mobil, breaks=-1:1)
+hist(cces_df$emp_track_bin2, breaks=-1:1)
+
+# plotting employer mobilization on x by perception of employer monitoring on y
+  # not a lot can be told from these 4 points, but it seems for most of the data there is no employer mobilization, but many people still think they are being monitored
+plot(cces_df$emp_mobil, cces_df$emp_track_bin2, pch=16, col=alpha("blue", 0.1))
+
+# a mosaic plot
+  # the above claims are confirmed
+table2 <- table(cces_df$emp_mobil, cces_df$emp_track_bin2)
+mosaicplot(table2, xlab="employer mobilization", ylab="perception of employer monitoring",
+           shade=TRUE)
+
+# most people don't think they are being monitored by their employer -- 
+  # important to see how this effects one's ability to be influenced by their employer
+```
+
+## The Data: Firm Survey
+
+```{r}
+# for the firm survey, reproducing the descriptive statistics table
+dim(firm_df) # 502 by 16
+
+firm_df_len <- dim(firm_df)[1]
+firm_desc_stats <- c("anycontact_w2_bin", "effect_mobil_1", "monitor", 
+                     "target_voter", "union", "revenue_w2", "companysize_w2", 
+                     "publiclytraded")
+
+firm_desc_stat_tab <- matrix(data=NA, nrow=length(firm_desc_stats), ncol=6)
+colnames(firm_desc_stat_tab) <- c("var", "max_N", "mean", "sd", "min", "max")
+
+for(i in seq_along(firm_desc_stats)) {
+  stat_i <- firm_df[, firm_desc_stats[i]]
+  nas_i <- sum(is.na(stat_i))
+  
+  firm_desc_stat_tab[i, ] <- c(firm_desc_stats[i],
+                               firm_df_len - nas_i,
+                               round(mean(stat_i, na.rm=TRUE), 2), 
+                               round(sd(stat_i, na.rm=TRUE), 2),
+                               round(min(stat_i, na.rm=TRUE), 2),
+                               round(max(stat_i, na.rm=TRUE), 2))
+}
+
+as.table(firm_desc_stat_tab)
+```
+
+```{r}
+par(mfrow = c(1, 2))
+hist(firm_df$monitor, breaks=0:4)
+hist(firm_df$anycontact_w2_bin, breaks=-1:1)
+
+# plotting electronic monitoring on x by employer mobilization on y
+plot(firm_df$monitor, firm_df$anycontact_w2_bin, pch=16, col=alpha("blue", 0.1))
+
+# a mosaic plot
+  # the above claims are confirmed
+table3 <- table(firm_df$monitor, firm_df$anycontact_w2_bin)
+mosaicplot(table3, xlab="electronic monitoring", ylab="employer mobilization",
+           shade=TRUE)
+
+# most firms do no report monitoring their employees
+  # but those that do also engage in mobilization more often
+```
+
+## Reproducing Results
+
+First, I am replicating table 1 from the paper: "Contrasting Employer, Union, and Partisan Mobilization". This is an important result that uses the standard OLS regression to find the correlation between mobilization from different sources and its impact on political participation. This uses the data from the CCES (survey of workers, not firms), and so it is based on self-reported data. Additionally, it is interesting to see here the impact adding different features to the model has on the result. For example with employer mobilization, after accounting for more features such as demographics and information about location, the coefficient increases by more than 0.2. And, although I am not replicating this, the appendix of the paper also provides a table that splits the political participatory acts further into specific categories such as donating and attending a meeting, allowing for even more insight 
+
+```{r}
+# replicate table 1, "Contrasting Employer, Union, and Partisan Mobilization"
+  # this uses OLS regression to compare the impact employer, union, and partisan mobilization
+  # has on individual political acts
+# there are four different models, with mod1 being the most basic and not accounting for 
+  # any individual / external characteristics
+  # whereas mod4 accounts for demographics, district competitiveness, and state fixed effects
+
+mod1 <- lm(participationindex ~ emp_mobil + union_mobil + partycand_mobil, 
+           data=cces_df, 
+           weights=weight)
+
+# accounting for demographics, specifically:
+  # if they are in a union, education level, race, level of political interest, 
+  # age, sex, family income, political ideology, and whether they voted in 2012
+mod2 <- lm(participationindex ~ emp_mobil + union_mobil + partycand_mobil +
+             currentunionmem + educ3 + white + black + hispanicrrace + polinterest + 
+             age + male + famincr + ideo_cons + votedin2012, 
+           data=cces_df, 
+           weights=weight)
+
+# accounting for demographics and district competitiveness, clustered by district
+  # district competitiveness is defined as...
+  # "distance of the Cook partisan voting index by House of Representative district from zero."
+mod3 <- lm(formula=participationindex ~ emp_mobil + union_mobil + partycand_mobil +
+             currentunionmem + educ3 + white + black + hispanicrrace + polinterest + 
+             age + male + famincr + ideo_cons + votedin2012 + pvidistance, 
+           data=cces_df,
+           weights=weight)
+# cluster by district
+mod3_cdid <- cluster.vcov(mod3, cces_df$cdid)
+mod3c <- coeftest(mod3, mod3_cdid)
+
+# accounting for demographics, district competitiveness, and state fixed effects
+mod4 <- lm(formula=participationindex ~ emp_mobil + union_mobil + partycand_mobil +
+             currentunionmem + educ3 + white + black + hispanicrrace + polinterest + 
+             age + male + famincr + ideo_cons + votedin2012 + pvidistance + statefip, 
+           data=cces_df,
+           weights=weight)
+# cluster by statefip -- either state or state grouping
+mod4_statefip <- cluster.vcov(mod4, cces_df$statefip)
+mod4c <- coeftest(mod4, mod4_statefip)
+
+# the table
+mob_tab <- matrix(data=NA, nrow=6, ncol=4)
+colnames(mob_tab) <- c("mod1", "mod2", "mod3", "mod4")
+rownames(mob_tab) <- c("employer mob", "", 
+                       "union mob", "", 
+                       "party/candidate mob", "")
+dim_mob <- dim(mob_tab)
+# there are definitely ways I could have simplified this...
+for(i in seq_len(dim_mob[1]/2)) {
+  mob_tab[2*i-1, 1] <- mod1$coefficients[i+1]
+  mob_tab[2*i, 1] <- summary(mod1)$coefficients[i+1, "Std. Error"]
+  
+  mob_tab[2*i-1, 2] <- mod2$coefficients[i+1]
+  mob_tab[2*i, 2] <- summary(mod2)$coefficients[i+1, "Std. Error"]
+  
+  mob_tab[2*i-1, 3] <- mod3c[i+1, "Estimate"]
+  mob_tab[2*i, 3] <- mod3c[i+1, "Std. Error"]
+  
+  mob_tab[2*i-1, 4] <- mod4c[i+1, "Estimate"]
+  mob_tab[2*i, 4] <- mod4c[i+1, "Std. Error"]
+}
+
+# rounding function from https://stackoverflow.com/questions/29875914/rounding-values-in-a-dataframe-in-r
+round_df <- function(x, digits) {
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x
+}
+
+mob_tab <- round_df(mob_tab, 2)
+
+# to replicate the presentation style in the paper
+mob_tab[2,] <- paste0("(", format(unlist(mob_tab[2,])),")")
+mob_tab[4,] <- paste0("(", format(unlist(mob_tab[4,])),")")
+mob_tab[6,] <- paste0("(", format(unlist(mob_tab[6,])),")")
+
+# like the paper's table 1, we have OLS reg results and standard errors in parentheses
+  # the outcome is the count of participatory acts (scale of 0 to 5)
+as.table(mob_tab)
+
+# from this, we see that workers who have been mobilized by their employers engage in 0.82 participatory acts
+  # this figure is slightly different from the one in the paper of 0.77, 
+  # but this is due to the data I'm using being slightly updated since publishing
+# this number is also much higher than that for those mobilized by their union,
+  # suggesting employer mobilization can be even more powerful
+```
+
+I also wanted to replicate figure 1 from the paper because it incorporates predicted probability. This is also an important figure because it uses the survey results from the firm and seeks to find a relationship between monitoring employees and the probability of employer mobilization. 
+
+```{r}
+# replicate figure 1, "Employer monitoring of employees and mobilization of workers."
+
+log1 <- glm(anycontact_w2_bin ~ monitor + union + revenue_w2 + companysize_w2 + 
+              publiclytraded + sector,
+            family=binomial(link="logit"),
+            data=firm_df,
+            na.action=na.exclude)
+# cluster sector of firm
+log1_sec <- cluster.vcov(log1, firm_df$sector)
+log1c <- coeftest(log1, log1_sec)
+# the clustering data is very similar, but its easier to work with glm
+
+conf_int <- predict.lm(log1, interval="confidence", level=0.95)
+combo_df <- cbind(firm_df, conf_int)
+
+require(ggplot2)
+ggplot(combo_df, aes(monitor, anycontact_w2_bin)) +
+  stat_smooth(method = lm) + 
+  labs(x="Employer Monitoring of Employee Behavior",
+       y="Predicted Probability of Mobilizing Workers")
+
+# this does not look exactly like the figure in the paper,
+  # but it does follow a similar path, starting at a predicted prof around .7,
+  # and reaching to about .8 with the highest level of employer monitoring
+# still, this difference may be due to using r vs stata because it was difficult
+  # to figure out how to directly reproduce this (the paper simply used marginsplot in stata)
+# I also chose to make 
+```
+
+## Evaluating the Result
+
+For testing the result's sensitivity to data, that can be seen above as I replicated four different models, adding features each time. We see that standard error increases for each type of mobilization as the number of features also increases. However, the effect on the coefficient is different for each type. For employer mobilization, the increased specificity leads to a greater correlation between mobilization and political acts. As for union and party/candidate mobilization, there is a large jump after accounting for demographics, and then they are mostly level for the last three models. Also integral to this evaluation is the comparison of employer mobilization to other forms of mobilization -- a validation strategy of comparing to previously researched models.
+
+I am specifically interested in seeing the impact of past political interest. I will take away other features such as demographics and district competitiveness, because I would hypothesize that past poltiical interst is a very important feature.
+
+```{r}
+# defining past political interest as the vars: polinterest, ideo_cons, and votedin2012 
+modp <- lm(formula=participationindex ~ emp_mobil + union_mobil + partycand_mobil +
+             polinterest + ideo_cons + votedin2012, 
+           data=cces_df,
+           weights=weight)
+
+# table for easier visualization
+pol_tab <- matrix(data=NA, nrow=6, ncol=3)
+colnames(pol_tab) <- c("mod1", "mod4", "modp")
+rownames(pol_tab) <- c("employer mob", "", 
+                       "union mob", "", 
+                       "party/candidate mob", "")
+dim_pol <- dim(pol_tab)
+for(i in seq_len(dim_pol[1]/2)) {
+  pol_tab[2*i-1, 1] <- mod1$coefficients[i+1]
+  pol_tab[2*i, 1] <- summary(mod1)$coefficients[i+1, "Std. Error"]
+  
+  pol_tab[2*i-1, 2] <- mod4c[i+1, "Estimate"]
+  pol_tab[2*i, 2] <- mod4c[i+1, "Std. Error"]
+  
+  pol_tab[2*i-1, 3] <- modp$coefficients[i+1]
+  pol_tab[2*i, 3] <- summary(modp)$coefficients[i+1, "Std. Error"]
+}
+
+pol_tab <- round_df(pol_tab, 2)
+
+pol_tab[2,] <- paste0("(", format(unlist(pol_tab[2,])),")")
+pol_tab[4,] <- paste0("(", format(unlist(pol_tab[4,])),")")
+pol_tab[6,] <- paste0("(", format(unlist(pol_tab[6,])),")")
+
+as.table(pol_tab)
+
+
+# the results are very similar to mod4 which is the most complete model
+  # because of this, I am conlcuding that past political interest is more relevant
+  # the other features such as demographics and clustering based on location
+```
+
+I also want to see how the results change if I treat the y of participation index as a binary variable and use logistic regression. 
+
+```{r}
+# I will just compare mod4, the most complete model
+  # so 0, 1, 2 are 0 and 3, 4, 5 are 1
+  # iow, no longer a participation index but a participation marker
+    # only counting someone as politically active if they have at least an index of 3
+
+y <- cces_df$participationindex > 2 
+cces_df$y <- as.numeric(y)
+
+log4 <- glm(y ~ emp_mobil + union_mobil + partycand_mobil +
+              currentunionmem + educ3 + white + black + hispanicrrace + polinterest + 
+              age + male + famincr + ideo_cons + votedin2012 + pvidistance + statefip, 
+            data=cces_df,
+            weights=weight,
+            family=binomial(link="logit"))
+# cluster by statefip -- either state or state grouping
+log4_statefip <- cluster.vcov(log4, cces_df$statefip)
+log4c <- coeftest(log4, log4_statefip)
+
+#summary(mod4)
+#summary(log4)
+
+# table for easier visualization
+reg_tab <- matrix(data=NA, nrow=6, ncol=2)
+colnames(reg_tab) <- c("mod4", "log4")
+rownames(reg_tab) <- c("employer mob", "", 
+                       "union mob", "", 
+                       "party/candidate mob", "")
+dim_reg <- dim(reg_tab)
+for(i in seq_len(dim_reg[1]/2)) {
+  reg_tab[2*i-1, 1] <- mod4c[i+1, "Estimate"]
+  reg_tab[2*i, 1] <- mod4c[i+1, "Std. Error"]
+  
+  reg_tab[2*i-1, 2] <- log4c[i+1, "Estimate"]
+  reg_tab[2*i, 2] <- log4c[i+1, "Std. Error"]
+}
+
+reg_tab <- round_df(reg_tab, 3)
+
+reg_tab[2,] <- paste0("(", format(unlist(reg_tab[2,])),")")
+reg_tab[4,] <- paste0("(", format(unlist(reg_tab[4,])),")")
+reg_tab[6,] <- paste0("(", format(unlist(reg_tab[6,])),")")
+
+as.table(reg_tab)
+
+# with logistic regression, we see a much higher level of political participation for each type of mobilization
+  # however, this comes along with a very high standard error
+```
+
+
+
